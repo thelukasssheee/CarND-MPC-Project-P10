@@ -121,8 +121,8 @@ int main() {
 
           // Create current state vector from simulator
           Eigen::VectorXd curr_state(6);
-          curr_state << px, py, psi, v, cte, epsi;
-          // curr_state << 0, 0, 0, v, cte, epsi;
+          // curr_state << px, py, psi, v, cte, epsi;
+          curr_state << 0, 0, 0, v, cte, epsi;
 
           // Calculate steering angle and throttle using MPC.
           // Both are in between [-1, 1].
