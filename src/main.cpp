@@ -91,15 +91,18 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+          v = v * 0.44704; // conversion from mph to m/s
+          double delta = j[1]["steering_angle"];
+          double a = j[1]["throttle"];
 
           // Transform waypoints
-          for (int i = 0; i < ptsx.size(); ++i) {
+          for (unsigned int i = 0; i < ptsx.size(); ++i) {
             // Calculate delta between waypoints
             double delta_x = ptsx[i] - px;
             double delta_y = ptsy[i] - py;
             // Calculate transformed x and y waypoints
-            ptsx[i] = delta_x * cos(-psi) - delta_y * sin(-psi);
-            ptsy[i] = delta_x * sin(-psi) + delta_y * cos(-psi);
+            ptsx[i] =  delta_x * cos(-psi) - delta_y * sin(-psi);
+            ptsy[i] =  delta_x * sin(-psi) + delta_y * cos(-psi);
           }
 
           // Conversion to Eigen::VectorXd
@@ -108,28 +111,37 @@ int main() {
           Eigen::VectorXd y_vals =
             Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(ptsy.data(), ptsy.size());
 
-          // Fit a polynomial to the straight line with an order of 1
+          // Fit a 3rd order polynomial to the reference lane line
           auto coeffs = polyfit(x_vals, y_vals, 3);
 
-          // Calculate cross-track-error
-          double cte = polyeval(coeffs, 0);
-
-          // Calculate epsi (error of current yaw angle)
+          // Calculate epsi (error of vehicle's yaw angle compared to track)
           double epsi = -atan(coeffs[1]);
-          std::cout << "Coeffs: " << coeffs[0] <<","<<coeffs[1];
-          std::cout << " CTE:" << cte << " ePSI:" << epsi << std::endl;
 
-          // Create current state vector from simulator
+          // Calculate cross-track-error (deviation from lane center)
+          double cte = polyeval(coeffs, 0)*cos(epsi);
+
+          // Vehicle and simulator variables for prediction and latency compensation
+          const double Lf = 2.67;
+          const double dt = 0.1;
+
+          // Predict state after latency
+          double p_px =   0.0 + v * dt; // Psi is modeled as zero during prediction
+          double p_py =   0.0;          // with Psi modeled as zero, no lateral change
+          double p_psi =  0.0 + v * -delta / Lf * dt;
+          double p_v =    v + a * dt;
+          double p_cte =  cte + v * sin(epsi) * dt;
+          double p_epsi = p_psi + epsi;
+
+          // Create current state vector including latency prediction
           Eigen::VectorXd curr_state(6);
-          // curr_state << px, py, psi, v, cte, epsi;
-          curr_state << 0, 0, 0, v, cte, epsi;
+          curr_state << p_px, p_py, p_psi, p_v, p_cte, p_epsi;
 
           // Calculate steering angle and throttle using MPC.
           // Both are in between [-1, 1].
           auto MPC_solution = mpc.Solve(curr_state, coeffs);
 
           // Extract steering angle and throttle value
-          double steer_value = MPC_solution[0];
+          double steer_value = MPC_solution[0]; //
           double throttle_value = MPC_solution[1];
 
           // Display the line the MPC should follow in simulator (YELLOW LINE)
@@ -144,17 +156,17 @@ int main() {
           unsigned int n_mpc_vals = (MPC_solution.size()-2) * 0.5;
           vector<double> mpc_x_vals(n_mpc_vals);  // Pre-allocate variable with proper size
           vector<double> mpc_y_vals(n_mpc_vals);
-          for (int i = 2; i < MPC_solution.size()-1; i+=2) {
+          for (unsigned int i = 2; i < MPC_solution.size()-1; i+=2) {
             // Extract x,y pairs: x has even, y has odd index
             mpc_x_vals[(i-2)*0.5] = MPC_solution[i];
             mpc_y_vals[(i-2)*0.5] = MPC_solution[i+1];
           }
 
           // Create response message for simulator
-          json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = -steer_value;
+          json msgJson;
+          msgJson["steering_angle"] = steer_value / (Lf * deg2rad(25.));
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory
@@ -171,16 +183,11 @@ int main() {
 
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+          // std::cout << msg << std::endl;
+
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.
-          //
-          // Feel free to play around with this value but should be to drive
-          // around the track with 100ms latency.
-          //
-          // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
-          // SUBMITTING.
           this_thread::sleep_for(chrono::milliseconds(100));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
