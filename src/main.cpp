@@ -125,12 +125,18 @@ int main() {
           const double dt = 0.1;
 
           // Predict state after latency
-          double p_px =   0.0 + v * dt; // Psi is modeled as zero during prediction
-          double p_py =   0.0;          // with Psi modeled as zero, no lateral change
+          // Position in x direction will change dependent on current speed (car = coordinate system)
+          double p_px =   0.0 + v * dt;
+          // With psi modeled as zero, no lateral change
+          double p_py =   0.0;
+          // Vehicle yaw angle will change depending on steering angle
           double p_psi =  0.0 + v * -delta / Lf * dt;
+          // Velocity will change dependent on current acceleration value
           double p_v =    v + a * dt;
+          // Cross-track-error CTE will change depending on current deviation from lane direction
           double p_cte =  cte + v * sin(epsi) * dt;
-          double p_epsi = p_psi + epsi;
+          // No, this is not a drink ;) deviation from lane orientation will change steering angle
+          double p_epsi = epsi + v * -delta / Lf * dt;
 
           // Create current state vector including latency prediction
           Eigen::VectorXd curr_state(6);
@@ -138,6 +144,7 @@ int main() {
 
           // Calculate steering angle and throttle using MPC.
           // Both are in between [-1, 1].
+          // This is where the magic happens!!
           auto MPC_solution = mpc.Solve(curr_state, coeffs);
 
           // Extract steering angle and throttle value

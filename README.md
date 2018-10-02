@@ -1,6 +1,109 @@
 # CarND-Controls-MPC
 Self-Driving Car Engineer Nanodegree Program
 
+Project report by Michael Berner, 2nd of October 2018
+
+---
+## Project report / write-up
+
+### Project scope
+During this project, we had to implement a model-predictive-controller to keep a simulated vehicle on a race track.
+
+Term 2 simulator version 1.45 was used.
+
+![Intro image](/imgs/Intro.png)
+
+
+### Polynomial fitting and MPC preprocessing
+The current vehicle state is obtained from the simulator in the `main.cpp` routine. A pre-processing is carried out, in order to compensate for the modeled latency of 100ms. The used functions are shown and explained in `main.cpp` at line 127ff.
+
+All provided values from the simulator are in an absolute reference system, which means map or simulator coordinates. I have chosen to transform these values to the vehicle coordinate system, which are easier to process.
+
+The center of the track (see yellow line on image above) is also provided by the simulator. This line is the basis to calculate control commands. It is processed, by fitting a 3rd degree polynomial function to them. The polynomial is used for all further calculations.
+
+
+### Model description
+A model predictive controller was developed.
+
+It is consisting of 6 state variables
+- longitudinal position `x`
+- lateral position `y`
+- yaw angle `psi`
+- velocity `v`
+- cross-track-error `cte`
+- yaw error compared to track `epsi`
+
+and two actuator variables:
+- steering angle `delta`
+- acceleration value `a`
+
+
+The MPC controller is defined in the file `MPC.cpp`. Necessary inputs are the prepared state vector including actuator and the coefficients obtained from the polynomial fit described earlier.
+
+Based on this state vector, a cost-function and some further hyper parameters, the MPC controller is optimizing the actuator commands by minimizing the cost function. This is done not only for the current time-step, but for the series of upcoming time-steps. It is necessary to define a vehicle model beforehand, so the vehicle trajectory can be estimated by the MPC controller.
+
+The equations for the vehicle model can be found in line 119ff of `MPC.cpp`.
+
+The cost function is defined in line 53ff and also shown below:
+
+```
+// This part of the cost is based on the reference state.
+for (size_t t = 0; t < N; ++t) {
+  fg[0] +=  500.0 * CppAD::pow(vars[cte_start + t], 2);   // Cross-track-error CTE
+  fg[0] += 2000.0 * CppAD::pow(vars[epsi_start + t], 2);  // Yaw error compared to track
+  // Target velocity deviation, including conversion of target speed from MPH to m/s
+  fg[0] +=    0.6 * CppAD::pow(vars[v_start + t] - ref_v * 0.44704, 2);
+}
+
+// Minimize the use of actuators: steering angle and throttle/brake
+for (size_t t = 0; t < N - 1; ++t) {
+  fg[0] +=    0.1 * CppAD::pow(vars[delta_start + t], 2);   // Steering angle
+  fg[0] +=   10.0 * CppAD::pow(vars[a_start + t], 2);       // Acceleration/Deceleration
+}
+
+// Minimize the value gap between sequential actuations / time-steps.
+for (size_t t = 0; t < N - 2; ++t) {
+  // Change in steering angle
+  fg[0] +=  200.0 * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
+  // Change in acceleration
+  fg[0] +=   10.0 * CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
+  // Change of yaw error compared to lane (reduces wobbling and allows higher speed)
+  fg[0] += 1000.0 * CppAD::pow(vars[epsi_start + t + 1] - vars[epsi_start + t], 2);
+}
+```
+
+Many of the equations were provided in the Udacity lessons and can be understood right away.
+
+Here, I want to point out the last of these equations. I introduced it to achieve higher vehicle speeds by reducing the vehicle oscillations (comparison of yaw error between two time-steps). This was one key aspect to eventually reach 100 MPH.
+
+
+### Timestep length & elapsed duration
+
+The amount of time-steps `N` and time-step duration `dt` were optimized.
+
+It was found, that the amount of steps `N` should not be lower than 10, because the MPC predicted trajectory became unstable. Increasing the number beyond 10 was also not feasible, because some timing issues started to arise due to CPU limitations.
+
+For the duration `dt`, a starting value of 0.1s was selected, at first. This value was later found to be too low, since the resulting distance, which the MPC was predicting, was not sufficient to keep the vehicle properly on track: the values needs to be higher.  
+
+Eventually, A combination of `N = 10` timesteps with a duration of `dt = 0.12` seconds was found to perform reasonably well.
+
+
+### Latency compensation
+
+In reality, there will be a delay between the issue of commands and the physical reaction of the vehicle. This is modeled as a delay of 100ms in the simulation environment.
+
+The model's accuracy can be further improved, if the MPC controller takes this latency into account.
+
+I have modeled the latency in my MPC controller, by updating the state vector before it is passed to the MPC routine. Basically, the telemetry data from the simulator is extrapolated using the basic kinematic "bicycle model" along with the assumed 100ms latency. The equations can be found in the main routine in line 127ff.
+
+## Project summary
+
+Overall, a MPC controller was developed, which is able to realize vehicle speeds of 100 MPH.
+
+The vehicle is a bit shaky, but this is due to race-trim which was applied. If the desired vehicle speed is reduced to 80MPH or lower, the vehicle operation becomes much more stable.
+
+A video of the realization can be found on [Youtube](https://youtu.be/HP4NiK15VLQ).
+
 ---
 
 ## Dependencies
